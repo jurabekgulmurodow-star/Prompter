@@ -29,6 +29,7 @@ button:disabled{opacity:.5}
 .it{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}
 .ctx{font-size:13px;color:var(--mut);margin-top:2px;line-height:1.4}
 button.x{flex:0 0 auto;padding:4px 10px}
+mark.hl{background:var(--ac);color:var(--acfg);padding:0 3px;border-radius:4px;font-weight:700}
 #rec{font-size:13px;color:var(--ac);font-weight:600}
 #res{display:none;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--card)}
 audio{width:100%}
@@ -44,6 +45,10 @@ audio{width:100%}
       <label>Tezlik: <span id="spv">40</span><input id="sp" type="range" min="10" max="150" value="40"></label>
       <label>Harf o‘lchami: <span id="fsv">26</span><input id="fs" type="range" min="16" max="48" value="26"></label>
     </div>
+    <div class="row">
+      <label>Har nechta gapda: <span id="cnv">2</span><input id="cn" type="range" min="1" max="6" value="2"></label>
+      <label>Nechta soʻz tushsin: <span id="cmv">1</span><input id="cm" type="range" min="1" max="5" value="1"></label>
+    </div>
     <button class="p" id="start">Boshlash va yozish</button>
     <button id="diag" style="flex:0 0 auto">Mikrofon diagnostikasi</button>
     <pre id="dg" style="display:none;white-space:pre-wrap;font-size:12px;margin:0;padding:10px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg)"></pre>
@@ -53,6 +58,7 @@ audio{width:100%}
       <div class="row"><button id="bksh">Ulashish / nusxalash</button><button id="bkclr">Tozalash</button></div>
       <div id="bkm" style="font-size:13px;color:var(--mut)"></div>
     </div>
+    <div id="rv" style="display:none;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--card)"><div style="font-weight:600">Berkitilgan soʻlar</div><div id="rvt" style="line-height:1.6;white-space:pre-wrap"></div></div>
     <div id="res">
       <div style="font-weight:600">Oxirgi yozuv</div>
       <audio id="aud" controls></audio>
@@ -82,8 +88,32 @@ async function put(k,v){try{const d=await db();d.transaction('k','readwrite').ob
 async function get(k){try{const d=await db();return await new Promise(r=>{const q=d.transaction('k').objectStore('k').get(k);q.onsuccess=()=>r(q.result);q.onerror=()=>r(undefined)})}catch(e){return undefined}}
 
 // ---- blanks: every 2 sentences, one random word ----
-let SENTS=[];
+let SENTS=[],REVIEW='';
 function makeBlanks(text){
+  const N=Math.max(1,+$('cn').value||2),M=Math.max(1,+$('cm').value||1);
+  SENTS=(text.replace(/\s+/g,' ').trim().match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g)||[]).map(s=>s.trim());
+  let out='',rev='';
+  for(let i=0;i<SENTS.length;i+=N){
+    const grp=SENTS.slice(i,i+N),items=[];
+    grp.forEach((s,k)=>{s.split(/(\s+)/).forEach(t=>items.push({t,s:i+k}));items.push({t:' ',s:i+k})});
+    const cand=[];
+    if(grp.length===N)items.forEach((it,j)=>{if(((it.t.match(/[A-Za-z']+/)||[''])[0]).length>=3)cand.push(j)});
+    const picks=new Set();
+    while(picks.size<Math.min(M,cand.length))picks.add(cand[Math.floor(Math.random()*cand.length)]);
+    items.forEach((it,j)=>{
+      let first=true;
+      it.t.split(/([A-Za-z']+)/).forEach((p,x)=>{
+        if(x%2===0){out+=esc(p);rev+=esc(p);return}
+        const bl=picks.has(j)&&first;first=false;
+        out+='<span class="w'+(bl?' bl':'')+'" data-s="'+it.s+'" data-w="'+esc(p)+'">'+(bl?'______':esc(p))+'</span>';
+        rev+=bl?'<mark class="hl">'+esc(p)+'</mark>':esc(p);
+      });
+    });
+  }
+  REVIEW=rev;
+  return out;
+}
+function makeBlanksV2(text){
   SENTS=(text.replace(/\s+/g,' ').trim().match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g)||[]).map(s=>s.trim());
   let out='';
   for(let i=0;i<SENTS.length;i+=2){
@@ -130,6 +160,9 @@ function syncSp(v){speed=+v;$('sp').value=v;$('sp2').value=v;$('spv').textConten
 $('sp').oninput=e=>syncSp(e.target.value);
 $('sp2').oninput=e=>syncSp(e.target.value);
 $('fs').oninput=e=>{$('fsv').textContent=e.target.value};
+function saveCfg(){put('cfg',{n:$('cn').value,m:$('cm').value,sp:$('sp').value,fs:$('fs').value})}
+$('cn').oninput=e=>{$('cnv').textContent=e.target.value;saveCfg()};
+$('cm').oninput=e=>{$('cmv').textContent=e.target.value;saveCfg()};
 
 // ---- start / stop ----
 $('start').onclick=async()=>{
@@ -149,7 +182,7 @@ $('start').onclick=async()=>{
   mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
   mr.onstop=finish;
   mr.start(1000);
-  $('txt').innerHTML=makeBlanks(text);
+  $('txt').innerHTML=makeBlanks(text);saveCfg();put('review',REVIEW);$('rv').style.display='none';
   $('txt').style.fontSize=$('fs').value+'px';
   $('setup').style.display='none';$('read').style.display='flex';
   $('stage').scrollTop=0;acc=0;last=0;paused=false;$('pause').textContent='Pauza';
@@ -169,6 +202,7 @@ function showResult(){
   $('read').style.display='none';$('setup').style.display='flex';
   $('res').style.display='flex';
   $('aud').src=URL.createObjectURL(blob);
+  if(REVIEW){$('rvt').innerHTML=REVIEW;$('rv').style.display='flex'}
   $('msg').textContent='';
 }
 $('share').onclick=async()=>{
@@ -226,6 +260,8 @@ $('bksh').onclick=async()=>{
 (async()=>{
   const t=await get('text');if(t)$('src').value=t;
   const bk=await get('basket');if(Array.isArray(bk)){basket=bk;renderBasket()}
+  const rvw=await get('review');if(typeof rvw==='string')REVIEW=rvw;
+  const cf=await get('cfg');if(cf){$('cn').value=cf.n;$('cm').value=cf.m;$('cnv').textContent=cf.n;$('cmv').textContent=cf.m;if(cf.sp)syncSp(cf.sp);if(cf.fs){$('fs').value=cf.fs;$('fsv').textContent=cf.fs}}
   const b=await get('audio');if(b&&b.size){blob=b;showResult()}
 })();
 </script>
