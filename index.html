@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Teleprompter</title>
+<style>
+:root{--bg:#fafaf7;--fg:#1c1c1a;--mut:#6b6b66;--card:#fff;--bd:#dcdcd5;--ac:#c2410c;--acfg:#fff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141413;--fg:#f1f1ec;--mut:#a0a09a;--card:#1f1f1d;--bd:#3a3a36;--ac:#fb923c;--acfg:#1c1c1a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141413;--fg:#f1f1ec;--mut:#a0a09a;--card:#1f1f1d;--bd:#3a3a36;--ac:#fb923c;--acfg:#1c1c1a;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,"Segoe UI",sans-serif}
+#app{height:100%;display:flex;flex-direction:column;padding:14px;gap:12px}
+h1{font-size:18px;margin:0}
+textarea{flex:1;min-height:120px;width:100%;resize:none;padding:12px;font-size:16px;line-height:1.5;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg);font-family:inherit}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+label{font-size:13px;color:var(--mut);display:flex;flex-direction:column;gap:4px;flex:1;min-width:130px}
+input[type=range]{width:100%;accent-color:var(--ac)}
+button{font:inherit;font-weight:600;padding:12px 16px;border-radius:12px;border:1px solid var(--bd);background:var(--card);color:var(--fg);cursor:pointer;flex:1}
+button.p{background:var(--ac);color:var(--acfg);border-color:var(--ac)}
+button:disabled{opacity:.5}
+#read{display:none;flex:1;min-height:0;flex-direction:column;gap:10px}
+#stage{flex:1;min-height:0;overflow:hidden;position:relative;border:1px solid var(--bd);border-radius:12px;background:var(--card)}
+#txt{padding:30vh 16px 60vh;line-height:1.6;white-space:pre-wrap;font-weight:500}
+.bl{color:var(--ac);font-weight:700;letter-spacing:1px}
+.w{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.w.sv{text-decoration:underline;text-decoration-color:var(--ac);text-decoration-thickness:2px}
+.it{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--bd)}
+.ctx{font-size:13px;color:var(--mut);margin-top:2px;line-height:1.4}
+button.x{flex:0 0 auto;padding:4px 10px}
+#rec{font-size:13px;color:var(--ac);font-weight:600}
+#res{display:none;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--card)}
+audio{width:100%}
+#msg{font-size:13px;color:var(--mut);white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="setup" style="display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;overflow-y:auto">
+    <h1>Teleprompter</h1>
+    <textarea id="src" placeholder="Inglizcha matnni shu yerga kiriting…"></textarea>
+    <div class="row">
+      <label>Tezlik: <span id="spv">40</span><input id="sp" type="range" min="10" max="150" value="40"></label>
+      <label>Harf o‘lchami: <span id="fsv">26</span><input id="fs" type="range" min="16" max="48" value="26"></label>
+    </div>
+    <button class="p" id="start">Boshlash va yozish</button>
+    <button id="diag" style="flex:0 0 auto">Mikrofon diagnostikasi</button>
+    <pre id="dg" style="display:none;white-space:pre-wrap;font-size:12px;margin:0;padding:10px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg)"></pre>
+    <div id="bk" style="display:none;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--card)">
+      <div style="font-weight:600">Savat (<span id="bkn">0</span>)</div>
+      <div id="bkl"></div>
+      <div class="row"><button id="bksh">Ulashish / nusxalash</button><button id="bkclr">Tozalash</button></div>
+      <div id="bkm" style="font-size:13px;color:var(--mut)"></div>
+    </div>
+    <div id="res">
+      <div style="font-weight:600">Oxirgi yozuv</div>
+      <audio id="aud" controls></audio>
+      <div class="row"><button id="share">Telegramga ulashish</button></div>
+      <div id="msg"></div>
+    </div>
+  </div>
+  <div id="read">
+    <div id="rec">● Yozilmoqda…</div>
+    <div id="stage"><div id="txt"></div></div>
+    <div class="row">
+      <label>Tezlik: <span id="spv2">40</span><input id="sp2" type="range" min="10" max="150" value="40"></label>
+    </div>
+    <div class="row">
+      <button id="pause">Pauza</button>
+      <button class="p" id="stop">To‘xtatish</button>
+    </div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let speed=40,paused=false,raf=0,last=0,acc=0,mr=null,chunks=[],stream=null,blob=null,mime='';
+
+// ---- storage (last recording only) ----
+function db(){return new Promise((res,rej)=>{try{const r=indexedDB.open('tp',1);r.onupgradeneeded=()=>r.result.createObjectStore('k');r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}})}
+async function put(k,v){try{const d=await db();d.transaction('k','readwrite').objectStore('k').put(v,k)}catch(e){}}
+async function get(k){try{const d=await db();return await new Promise(r=>{const q=d.transaction('k').objectStore('k').get(k);q.onsuccess=()=>r(q.result);q.onerror=()=>r(undefined)})}catch(e){return undefined}}
+
+// ---- blanks: every 2 sentences, one random word ----
+let SENTS=[];
+function makeBlanks(text){
+  SENTS=(text.replace(/\s+/g,' ').trim().match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g)||[]).map(s=>s.trim());
+  let out='';
+  for(let i=0;i<SENTS.length;i+=2){
+    const grp=SENTS.slice(i,i+2),items=[];
+    grp.forEach((s,k)=>{s.split(/(\s+)/).forEach(t=>items.push({t,s:i+k}));items.push({t:' ',s:i+k})});
+    const cand=[];
+    if(grp.length===2)items.forEach((it,j)=>{if(((it.t.match(/[A-Za-z']+/)||[''])[0]).length>=3)cand.push(j)});
+    const pick=cand.length?cand[Math.floor(Math.random()*cand.length)]:-1;
+    out+=items.map((it,j)=>{
+      let first=true;
+      return it.t.split(/([A-Za-z']+)/).map((p,x)=>{
+        if(x%2===0)return esc(p);
+        const bl=j===pick&&first;first=false;
+        return '<span class="w'+(bl?' bl':'')+'" data-s="'+it.s+'" data-w="'+esc(p)+'">'+(bl?'______':esc(p))+'</span>';
+      }).join('');
+    }).join('');
+  }
+  return out;
+}
+function makeBlanksOld(text){
+  const sents=text.replace(/\s+/g,' ').trim().match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g)||[];
+  let out='';
+  for(let i=0;i<sents.length;i+=2){
+    const pair=sents.slice(i,i+2);
+    if(pair.length<2){out+=esc(pair.join(''));continue}
+    const toks=pair.join('').split(/(\s+)/);
+    const cand=[];
+    toks.forEach((t,j)=>{const m=t.match(/[A-Za-z']+/);if(m&&m[0].length>=3)cand.push(j)});
+    const pick=cand.length?cand[Math.floor(Math.random()*cand.length)]:-1;
+    out+=toks.map((t,j)=>j===pick?esc(t).replace(/[A-Za-z']+/,'<span class="bl">______</span>'):esc(t)).join('');
+  }
+  return out;
+}
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+// ---- scroll loop ----
+function tick(t){
+  if(!last)last=t;
+  const dt=(t-last)/1000;last=t;
+  if(!paused){acc+=speed*dt;const st=$('stage');const whole=Math.floor(acc);if(whole){st.scrollTop+=whole;acc-=whole}}
+  raf=requestAnimationFrame(tick);
+}
+function syncSp(v){speed=+v;$('sp').value=v;$('sp2').value=v;$('spv').textContent=v;$('spv2').textContent=v}
+$('sp').oninput=e=>syncSp(e.target.value);
+$('sp2').oninput=e=>syncSp(e.target.value);
+$('fs').oninput=e=>{$('fsv').textContent=e.target.value};
+
+// ---- start / stop ----
+$('start').onclick=async()=>{
+  const text=$('src').value.trim();
+  if(!text){alert('Avval matn kiriting.');return}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:true});
+  }catch(e){
+    $('msg').textContent='Mikrofonga ruxsat berilmadi: '+(e.name||e);
+    diag().then(t=>{$('msg').textContent+='\n\n'+t});
+    $('res').style.display='flex';return;
+  }
+  const types=['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg'];
+  mime=types.find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported(t))||'';
+  chunks=[];
+  mr=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+  mr.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data)};
+  mr.onstop=finish;
+  mr.start(1000);
+  $('txt').innerHTML=makeBlanks(text);
+  $('txt').style.fontSize=$('fs').value+'px';
+  $('setup').style.display='none';$('read').style.display='flex';
+  $('stage').scrollTop=0;acc=0;last=0;paused=false;$('pause').textContent='Pauza';
+  raf=requestAnimationFrame(tick);
+};
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Davom etish':'Pauza'};
+$('stop').onclick=()=>{cancelAnimationFrame(raf);if(mr&&mr.state!=='inactive')mr.stop()};
+
+async function finish(){
+  stream&&stream.getTracks().forEach(t=>t.stop());
+  blob=new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'});
+  await put('audio',blob);await put('text',$('src').value);
+  showResult();
+}
+function ext(){const t=blob.type;return t.includes('mp4')?'m4a':t.includes('ogg')?'ogg':'webm'}
+function showResult(){
+  $('read').style.display='none';$('setup').style.display='flex';
+  $('res').style.display='flex';
+  $('aud').src=URL.createObjectURL(blob);
+  $('msg').textContent='';
+}
+$('share').onclick=async()=>{
+  if(!blob)return;
+  const f=new File([blob],'recording.'+ext(),{type:blob.type});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'Recording'});return}
+    $('msg').textContent='Bu brauzerda fayl ulashish ishlamadi. Audio pleyerdagi ⋮ menyusidan yuklab oling.';
+  }catch(e){if(e.name!=='AbortError')$('msg').textContent='Ulashib bo‘lmadi: '+(e.message||e.name)}
+};
+
+// ---- diagnostics ----
+async function diag(){
+  const L=[];
+  let framed=false;try{framed=window.top!==window}catch(e){framed=true}
+  L.push('Boshqa oyna ichida (iframe): '+(framed?'HA':'yo‘q'));
+  L.push('Xavfsiz aloqa (https): '+(window.isSecureContext?'ha':'YO‘Q'));
+  L.push('mediaDevices: '+(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia?'bor':'YO‘Q'));
+  L.push('MediaRecorder: '+(window.MediaRecorder?'bor':'YO‘Q'));
+  try{const pp=document.permissionsPolicy||document.featurePolicy;if(pp&&pp.allowsFeature)L.push('Sahifa siyosati mikrofonga: '+(pp.allowsFeature('microphone')?'ruxsat':'BLOKLANGAN'))}catch(e){}
+  try{const p=await navigator.permissions.query({name:'microphone'});L.push('Brauzer ruxsati: '+p.state)}catch(e){L.push('Brauzer ruxsati: aniqlab bo‘lmadi')}
+  try{const d=await navigator.mediaDevices.enumerateDevices();L.push('Mikrofonlar soni: '+d.filter(x=>x.kind==='audioinput').length)}catch(e){}
+  L.push('Brauzer: '+navigator.userAgent.slice(0,90));
+  return L.join('\n');
+}
+$('diag').onclick=async()=>{const d=$('dg');d.style.display='block';d.textContent='Tekshirilmoqda…';d.textContent=await diag()};
+
+// ---- basket: tapped words with their sentence ----
+let basket=[],clrArm=false;
+function renderBasket(){
+  $('bkn').textContent=basket.length;
+  $('bk').style.display=basket.length?'flex':'none';
+  $('bkl').innerHTML=basket.map((b,i)=>'<div class="it"><div><b>'+esc(b.w)+'</b><div class="ctx">'+esc(b.t)+'</div></div><button class="x" data-i="'+i+'">✕</button></div>').join('');
+}
+$('txt').addEventListener('click',e=>{
+  const el=e.target.closest('.w');if(!el)return;
+  const w=el.dataset.w,t=SENTS[+el.dataset.s]||'';
+  el.classList.add('sv');
+  if(!basket.some(b=>b.w.toLowerCase()===w.toLowerCase()&&b.t===t)){basket.push({w,t});put('basket',basket);renderBasket()}
+  try{navigator.vibrate&&navigator.vibrate(20)}catch(_){}
+  const r=$('rec');r.textContent='✔ Saqlandi: '+w;clearTimeout(window._rt);window._rt=setTimeout(()=>{r.textContent='● Yozilmoqda…'},1500);
+});
+$('bkl').onclick=e=>{const x=e.target.closest('.x');if(!x)return;basket.splice(+x.dataset.i,1);put('basket',basket);renderBasket()};
+$('bkclr').onclick=()=>{
+  if(!clrArm){clrArm=true;$('bkclr').textContent='Aniqmi? Yana bosing';setTimeout(()=>{clrArm=false;$('bkclr').textContent='Tozalash'},3000);return}
+  clrArm=false;$('bkclr').textContent='Tozalash';basket=[];put('basket',basket);renderBasket();
+};
+$('bksh').onclick=async()=>{
+  const txt=basket.map(b=>b.w+' — '+b.t).join('\n\n');
+  try{if(navigator.share){await navigator.share({text:txt});return}}catch(e){if(e.name==='AbortError')return}
+  try{await navigator.clipboard.writeText(txt);$('bkm').textContent='Nusxalandi'}catch(e){$('bkm').textContent='Nusxalab bo‘lmadi'}
+};
+
+// ---- restore last session ----
+(async()=>{
+  const t=await get('text');if(t)$('src').value=t;
+  const bk=await get('basket');if(Array.isArray(bk)){basket=bk;renderBasket()}
+  const b=await get('audio');if(b&&b.size){blob=b;showResult()}
+})();
+</script>
+</body>
+</html>
