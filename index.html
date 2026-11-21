@@ -21,7 +21,11 @@ button{font:inherit;font-weight:600;padding:12px 16px;border-radius:12px;border:
 button.p{background:var(--ac);color:var(--acfg);border-color:var(--ac)}
 button:disabled{opacity:.5}
 #read{display:none;flex:1;min-height:0;flex-direction:column;gap:10px}
-#stage{flex:1;min-height:0;overflow:hidden;position:relative;border:1px solid var(--bd);border-radius:12px;background:var(--card)}
+#wrap{flex:1;min-height:0;position:relative}
+#stage{position:absolute;inset:0;overflow:hidden;border:1px solid var(--bd);border-radius:12px;background:var(--card)}
+#wrap video.vv{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;border-radius:12px}
+#wrap.vm #stage{background:transparent;border-color:transparent}
+#wrap.vm #txt{color:#fff;text-shadow:0 1px 3px #000,0 0 10px #000;background:rgba(0,0,0,.3)}
 #txt{padding:30vh 16px 60vh;line-height:1.6;white-space:pre-wrap;font-weight:500}
 .bl{color:var(--ac);font-weight:700;letter-spacing:1px}
 .w{cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -49,6 +53,14 @@ audio{width:100%}
       <label>Har nechta gapda: <span id="cnv">2</span><input id="cn" type="range" min="1" max="6" value="2"></label>
       <label>Nechta soʻz tushsin: <span id="cmv">1</span><input id="cm" type="range" min="1" max="5" value="1"></label>
     </div>
+    <input type="file" id="vf" accept="video/*" style="display:none">
+    <button id="vpick" style="flex:0 0 auto">Video tanlash (ixtiyoriy)</button>
+    <video id="vid" playsinline preload="auto" controls style="display:none;width:100%;max-height:35vh;border-radius:12px;background:#000"></video>
+    <div id="vrow" style="display:none;flex-direction:column;gap:8px">
+      <div class="row"><label>Video ovozi: <span id="vlv">100</span><input id="vl" type="range" min="0" max="100" value="100"></label><button id="vclr" style="flex:0 0 auto">Videoni olib tashlash</button></div>
+      <label style="flex-direction:row;align-items:center;gap:8px;color:var(--fg);flex:none"><input type="checkbox" id="vfit" checked> Matn tezligi video uzunligiga moslansin</label>
+    </div>
+    <label style="flex-direction:row;align-items:center;gap:8px;color:var(--fg);flex:none"><input type="checkbox" id="blk" checked> So‘z tushib qolsin</label>
     <button class="p" id="start">Boshlash va yozish</button>
     <button id="diag" style="flex:0 0 auto">Mikrofon diagnostikasi</button>
     <pre id="dg" style="display:none;white-space:pre-wrap;font-size:12px;margin:0;padding:10px;border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--fg)"></pre>
@@ -58,6 +70,7 @@ audio{width:100%}
       <div class="row"><button id="bksh">Ulashish / nusxalash</button><button id="bkclr">Tozalash</button></div>
       <div id="bkm" style="font-size:13px;color:var(--mut)"></div>
     </div>
+    <div id="fvbox" style="display:none;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--card)"><div style="font-weight:600">Tayyor video</div><div id="fvst" style="font-size:13px;color:var(--mut)"></div><video id="fv" controls playsinline style="display:none;width:100%;border-radius:12px;background:#000"></video><button id="fvsh" style="display:none">Videoni ulashish</button></div>
     <div id="rv" style="display:none;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--bd);border-radius:12px;background:var(--card)"><div style="font-weight:600">Berkitilgan soʻlar</div><div id="rvt" style="line-height:1.6;white-space:pre-wrap"></div></div>
     <div id="res">
       <div style="font-weight:600">Oxirgi yozuv</div>
@@ -68,9 +81,10 @@ audio{width:100%}
   </div>
   <div id="read">
     <div id="rec">● Yozilmoqda…</div>
-    <div id="stage"><div id="txt"></div></div>
+    <div id="wrap"><div id="stage"><div id="txt"></div></div></div>
     <div class="row">
       <label>Tezlik: <span id="spv2">40</span><input id="sp2" type="range" min="10" max="150" value="40"></label>
+      <label id="vrow2" style="display:none">Video ovozi: <span id="vlv2">100</span><input id="vl2" type="range" min="0" max="100" value="100"></label>
     </div>
     <div class="row">
       <button id="pause">Pauza</button>
@@ -90,7 +104,7 @@ async function get(k){try{const d=await db();return await new Promise(r=>{const 
 // ---- blanks: every 2 sentences, one random word ----
 let SENTS=[],REVIEW='';
 function makeBlanks(text){
-  const N=Math.max(1,+$('cn').value||2),M=Math.max(1,+$('cm').value||1);
+  const N=Math.max(1,+$('cn').value||2),M=$('blk').checked?Math.max(1,+$('cm').value||1):0;
   SENTS=(text.replace(/\s+/g,' ').trim().match(/[^.!?]+[.!?]+["')\]]*\s*|[^.!?]+$/g)||[]).map(s=>s.trim());
   let out='',rev='';
   for(let i=0;i<SENTS.length;i+=N){
@@ -186,15 +200,24 @@ $('start').onclick=async()=>{
   $('txt').style.fontSize=$('fs').value+'px';
   $('setup').style.display='none';$('read').style.display='flex';
   $('stage').scrollTop=0;acc=0;last=0;paused=false;$('pause').textContent='Pauza';
+  vmode=!!vurl;vol0=vid.volume;
+  $('wrap').classList.toggle('vm',vmode);
+  if(vmode){
+    vid.controls=false;vid.className='vv';vid.style.cssText='';vid.currentTime=0;$('wrap').insertBefore(vid,$('stage'));
+    if($('vfit').checked&&vid.duration>0){const d=$('txt').scrollHeight-$('stage').clientHeight;if(d>0)syncSp(Math.max(5,Math.round(d/vid.duration)))}
+    $('vrow2').style.display='flex';
+    vid.onended=()=>$('stop').click();
+    vid.play().catch(()=>{});
+  }else $('vrow2').style.display='none';
   raf=requestAnimationFrame(tick);
 };
-$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Davom etish':'Pauza'};
-$('stop').onclick=()=>{cancelAnimationFrame(raf);if(mr&&mr.state!=='inactive')mr.stop()};
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'Davom etish':'Pauza';if(vmode){try{if(paused){vid.pause();mr.pause()}else{vid.play();mr.resume()}}catch(e){}}};
+$('stop').onclick=()=>{vid.onended=null;if(vmode)vid.pause();cancelAnimationFrame(raf);if(mr&&mr.state!=='inactive')mr.stop()};
 
 async function finish(){
   stream&&stream.getTracks().forEach(t=>t.stop());
   blob=new Blob(chunks,{type:mr.mimeType||mime||'audio/webm'});
-  await put('audio',blob);await put('text',$('src').value);
+  await put('audio',blob);await put('text',$('src').value);if(vmode){showResult();mergeVideo();return}
   showResult();
 }
 function ext(){const t=blob.type;return t.includes('mp4')?'m4a':t.includes('ogg')?'ogg':'webm'}
@@ -203,6 +226,7 @@ function showResult(){
   $('res').style.display='flex';
   $('aud').src=URL.createObjectURL(blob);
   if(REVIEW){$('rvt').innerHTML=REVIEW;$('rv').style.display='flex'}
+  if(vmode)restoreVid();
   $('msg').textContent='';
 }
 $('share').onclick=async()=>{
@@ -212,6 +236,55 @@ $('share').onclick=async()=>{
     if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f],title:'Recording'});return}
     $('msg').textContent='Bu brauzerda fayl ulashish ishlamadi. Audio pleyerdagi ⋮ menyusidan yuklab oling.';
   }catch(e){if(e.name!=='AbortError')$('msg').textContent='Ulashib bo‘lmadi: '+(e.message||e.name)}
+};
+
+// ---- video mode ----
+const vid=$('vid');let vurl='',vmode=false,vol0=1,fblob=null;
+function setVol(v){vid.volume=v/100;$('vl').value=v;$('vl2').value=v;$('vlv').textContent=v;$('vlv2').textContent=v}
+$('vl').oninput=e=>setVol(e.target.value);
+$('vl2').oninput=e=>setVol(e.target.value);
+$('vpick').onclick=()=>$('vf').click();
+$('vf').onchange=e=>{const f=e.target.files[0];if(!f)return;if(vurl)URL.revokeObjectURL(vurl);vurl=URL.createObjectURL(f);vid.src=vurl;vid.style.display='block';$('vrow').style.display='flex';setVol(100);$('vpick').textContent='Boshqa video tanlash'};
+$('vclr').onclick=()=>{vid.pause();vid.removeAttribute('src');vid.load();vid.style.display='none';$('vrow').style.display='none';if(vurl)URL.revokeObjectURL(vurl);vurl='';$('vpick').textContent='Video tanlash (ixtiyoriy)'};
+function restoreVid(){vid.className='';vid.controls=true;vid.style.cssText='display:block;width:100%;max-height:35vh;border-radius:12px;background:#000';$('setup').insertBefore(vid,$('src').nextSibling);$('wrap').classList.remove('vm');vid.currentTime=0}
+async function mergeVideo(){
+  const st=$('fvst');$('fvbox').style.display='flex';$('fv').style.display='none';$('fvsh').style.display='none';
+  st.textContent='Ovoz videoga yopishtirilmoqda…';
+  try{
+    const v=document.createElement('video');v.src=vurl;v.playsInline=true;v.preload='auto';
+    await new Promise((r,j)=>{v.onloadedmetadata=r;v.onerror=()=>j(new Error('video o‘qilmadi'))});
+    const a=new Audio(URL.createObjectURL(blob));
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const dest=ctx.createMediaStreamDestination();
+    const gv=ctx.createGain();gv.gain.value=vol0;
+    ctx.createMediaElementSource(v).connect(gv);gv.connect(dest);
+    ctx.createMediaElementSource(a).connect(dest);
+    if(!v.captureStream)throw new Error('brauzer videoni qayta yozishni qo‘llamaydi');
+    const vs=v.captureStream();
+    const ms=new MediaStream([...vs.getVideoTracks(),...dest.stream.getAudioTracks()]);
+    const vt=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';
+    const out=[];const rec=new MediaRecorder(ms,vt?{mimeType:vt}:undefined);
+    rec.ondataavailable=e=>{if(e.data&&e.data.size)out.push(e.data)};
+    const done=new Promise(r=>{rec.onstop=r});
+    await ctx.resume();
+    rec.start(1000);
+    await Promise.all([v.play(),a.play()]);
+    const tm=setInterval(()=>{st.textContent='Yopishtirilmoqda… '+Math.round(v.currentTime)+' / '+Math.round(v.duration)+' s'},500);
+    await new Promise(r=>{v.onended=r});
+    clearInterval(tm);
+    rec.stop();await done;
+    fblob=new Blob(out,{type:rec.mimeType||vt||'video/webm'});
+    $('fv').src=URL.createObjectURL(fblob);$('fv').style.display='block';$('fvsh').style.display='block';
+    st.textContent='Tayyor.';
+  }catch(e){st.textContent='Yopishtirib bo‘lmadi: '+(e.message||e.name)}
+}
+$('fvsh').onclick=async()=>{
+  if(!fblob)return;
+  const f=new File([fblob],'video.'+(fblob.type.includes('mp4')?'mp4':'webm'),{type:fblob.type});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[f]})){await navigator.share({files:[f]});return}
+    $('fvst').textContent='Ulashib bo‘lmadi. Videoning ⋮ menyusidan yuklab oling.';
+  }catch(e){if(e.name!=='AbortError')$('fvst').textContent='Ulashib bo‘lmadi: '+(e.message||e.name)}
 };
 
 // ---- diagnostics ----
@@ -267,3 +340,4 @@ $('bksh').onclick=async()=>{
 </script>
 </body>
 </html>
+
